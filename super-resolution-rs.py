@@ -6,10 +6,21 @@ import torch
 import torch.optim
 from osgeo import gdal
 from skimage.measure import compare_psnr
+from torch.nn import functional as F
 
 from models import *
 from models.downsampler import Downsampler
 from utils.sr_utils import *
+import random
+
+seed = 66
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+print("Random Seed: ", seed)
 
 
 def image_save(image, path):
@@ -37,7 +48,7 @@ torch.backends.cudnn.benchmark = True
 dtype = torch.cuda.FloatTensor
 
 imsize = -1
-factor = 4  # 8
+factor = 8  # 8
 enforse_div32 = 'CROP'  # we usually need the dimensions to be divisible by a power of two (32 in this case)
 PLOT = False
 
@@ -46,16 +57,19 @@ PLOT = False
 # path_to_image = 'data/sr/zebra_GT.png'
 path_to_image = '/home/guiyli/Documents/DataSet/NSRDB/tifFiles/2014/dhi/month1_day1_hour8_minute30_dhi.tif'
 
-
+# default num_scales is 5, which need the low resolution image size should be at least 16
+# we need to decrease num_scales to 4 to fit our data (8*8 --> 32*32 or 64*64)
+num_scales = 4
+lr_size = 8
+# generate ground truth image
 img = gdal.Open(path_to_image).ReadAsArray()
-
-img = Image.fromarray(img).resize((16 * factor, 16 * factor), Image.NEAREST)
+img = Image.fromarray(img).resize((lr_size * factor, lr_size * factor), Image.NEAREST)
 pixel_min, pixel_max = img.getextrema()
-image_save(img, 'results/resized_gt.tif')
+image_save(img, 'results/resized_gt_' + str(factor) + 'X.tif')
 img = ((np.array(img) - pixel_min) / max((pixel_max - pixel_min), 1e-5)) * (255 - 0) + 0
-image_save(img, 'results/resized_gt_0-255.tif')
-path_to_image = 'results/resized_gt_0-255.tif'
-
+image_save(img, 'results/resized_gt_0-255_' + str(factor) + 'X.tif')
+image_save(img, 'results/resized_gt_0-255_' + str(factor) + 'X.png')
+path_to_image = 'results/resized_gt_0-255_' + str(factor) + 'X.tif'
 
 # Starts here
 imgs = load_LR_HR_imgs_sr(path_to_image, imsize, factor, enforse_div32)
@@ -65,15 +79,12 @@ imgs['bicubic_np'], imgs['sharp_np'], imgs['nearest_np'] = get_baselines(
 )
 
 input_depth = 32
-
 INPUT = 'noise'
 pad = 'reflection'
 OPT_OVER = 'net'
 KERNEL_TYPE = 'lanczos2'
-
 LR = 0.01
 tv_weight = 0.0
-
 OPTIMIZER = 'adam'
 
 if factor == 4:
@@ -100,7 +111,7 @@ net = get_net(
     skip_n33d=128,
     skip_n33u=128,
     skip_n11=4,
-    num_scales=5,
+    num_scales=num_scales,  # default 5
     upsample_mode='bilinear',
     n_channels=n_channels,
 ).type(dtype)
@@ -173,12 +184,18 @@ result_deep_prior = put_in_center(
     out_HR_np, imgs['orig_np'].shape[1:], n_channels=n_channels
 )
 
-result_deep_prior = (
+# 0-255
+result_255 = (
+    (result_deep_prior - result_deep_prior.min())
+    / max((result_deep_prior.max() - result_deep_prior.min()), 1e-5)
+) * (255 - 0) + 0
+image_save(result_255, 'results/result_deep_prior_0-255_' + str(factor) + 'X.png')
+# original data range
+result_original = (
     (result_deep_prior - result_deep_prior.min())
     / max((result_deep_prior.max() - result_deep_prior.min()), 1e-5)
 ) * (pixel_max - pixel_min) + pixel_min
-image_save(result_deep_prior, 'results/result_deep_prior.tif')
-np.save('results/result_deep_prior.npy', result_deep_prior)
+image_save(result_original, 'results/result_deep_prior_' + str(factor) + 'X.tif')
 
 # For the paper we acually took `_bicubic.png` files from LapSRN viewer and used `result_deep_prior` as our result
 plot_image_grid([imgs['HR_np'], imgs['bicubic_np'], out_HR_np], factor=4, nrow=1)
