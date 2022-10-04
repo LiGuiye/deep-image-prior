@@ -1,7 +1,7 @@
 from .common_utils import *
 
-def put_in_center(img_np, target_size):
-    img_out = np.zeros([3, target_size[0], target_size[1]])
+def put_in_center(img_np, target_size, n_channels=3):
+    img_out = np.zeros([n_channels, target_size[0], target_size[1]])
     
     bbox = [
             int((target_size[0] - img_np.shape[1]) / 2),
@@ -74,8 +74,9 @@ def get_baselines(img_LR_pil, img_HR_pil):
     img_nearest_pil = img_LR_pil.resize(img_HR_pil.size, Image.NEAREST)
     img_nearest_np = pil_to_np(img_nearest_pil)
 
-    img_bic_sharp_pil = img_bicubic_pil.filter(PIL.ImageFilter.UnsharpMask())
-    img_bic_sharp_np = pil_to_np(img_bic_sharp_pil)
+    # img_bic_sharp_pil = img_bicubic_pil.filter(PIL.ImageFilter.UnsharpMask())
+    # img_bic_sharp_np = pil_to_np(img_bic_sharp_pil)
+    img_bic_sharp_np = img_bicubic_np
 
     return img_bicubic_np, img_bic_sharp_np, img_nearest_np
 
