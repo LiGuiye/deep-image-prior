@@ -7,21 +7,11 @@ import torch.optim
 from osgeo import gdal
 from skimage.measure import compare_psnr
 from torch.nn import functional as F
-
+from glob import glob
 from models import *
 from models.downsampler import Downsampler
 from utils.sr_utils import *
 import random
-
-seed = 66
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
-torch.cuda.manual_seed_all(seed)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
-print("Random Seed: ", seed)
-
 
 def image_save(image, path):
     '''
@@ -42,160 +32,190 @@ def image_save(image, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
     cv2.imwrite(path, image.squeeze(), [cv2.IMWRITE_TIFF_COMPRESSION, 0])
 
+for factor in [4,8]:
+    seed = 66
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    print("Random Seed: ", seed)
 
-torch.backends.cudnn.enabled = True
-torch.backends.cudnn.benchmark = True
-dtype = torch.cuda.FloatTensor
+    torch.backends.cudnn.enabled = True
+    torch.backends.cudnn.benchmark = True
+    dtype = torch.cuda.FloatTensor
 
-imsize = -1
-factor = 8  # 8
-enforse_div32 = 'CROP'  # we usually need the dimensions to be divisible by a power of two (32 in this case)
-PLOT = False
+    imsize = -1
+    enforse_div32 = 'CROP'  # we usually need the dimensions to be divisible by a power of two (32 in this case)
+    PLOT = False
 
-# To produce images from the paper we took *_GT.png images from LapSRN viewer for corresponding factor,
-# e.g. x4/zebra_GT.png for factor=4, and x8/zebra_GT.png for factor=8
-# path_to_image = 'data/sr/zebra_GT.png'
-path_to_image = '/home/guiyli/Documents/DataSet/NSRDB/tifFiles/2014/dhi/month1_day1_hour8_minute30_dhi.tif'
+    path_to_image = '/home/guiyli/Documents/DataSet/NSRDB/tifFiles/2014/dhi/month1_day1_hour8_minute30_dhi.tif'
 
-# default num_scales is 5, which need the low resolution image size should be at least 16
-# we need to decrease num_scales to 4 to fit our data (8*8 --> 32*32 or 64*64)
-num_scales = 4
-lr_size = 8
-# generate ground truth image
-img = gdal.Open(path_to_image).ReadAsArray()
-img = Image.fromarray(img).resize((lr_size * factor, lr_size * factor), Image.NEAREST)
-pixel_min, pixel_max = img.getextrema()
-image_save(img, 'results/resized_gt_' + str(factor) + 'X.tif')
-img = ((np.array(img) - pixel_min) / max((pixel_max - pixel_min), 1e-5)) * (255 - 0) + 0
-image_save(img, 'results/resized_gt_0-255_' + str(factor) + 'X.tif')
-image_save(img, 'results/resized_gt_0-255_' + str(factor) + 'X.png')
-path_to_image = 'results/resized_gt_0-255_' + str(factor) + 'X.tif'
+    # default num_scales is 5, which need the low resolution image size should be at least 16
+    # we need to decrease num_scales to 4 to fit our data (8*8 --> 32*32 or 64*64)
+    num_scales = 4
+    lr_size = 8
 
-# Starts here
-imgs = load_LR_HR_imgs_sr(path_to_image, imsize, factor, enforse_div32)
+    # To produce images from the paper we took *_GT.png images from LapSRN viewer for corresponding factor,
+    # e.g. x4/zebra_GT.png for factor=4, and x8/zebra_GT.png for factor=8
+    # path_to_image = 'data/sr/zebra_GT.png'
 
-imgs['bicubic_np'], imgs['sharp_np'], imgs['nearest_np'] = get_baselines(
-    imgs['LR_pil'], imgs['HR_pil']
-)
+    # '/home/guiyli/Documents/DataSet/Wind/2014/u_v'
+    # '/lustre/scratch/guiyli/Dataset_WIND/npyFiles/u_v/2014'
+    path = '/lustre/scratch/guiyli/Dataset_WIND/DIP/Wind2014_remove>20'
 
-input_depth = 32
-INPUT = 'noise'
-pad = 'reflection'
-OPT_OVER = 'net'
-KERNEL_TYPE = 'lanczos2'
-LR = 0.01
-tv_weight = 0.0
-OPTIMIZER = 'adam'
+    # generate ground truth image
+    for f in glob(path+'/*.npy'):
+        images = np.load(f).astype(np.float32)
 
-if factor == 4:
-    num_iter = 2000
-    reg_noise_std = 0.03
-elif factor == 8:
-    num_iter = 4000
-    reg_noise_std = 0.05
-else:
-    assert False, 'We did not experiment with other factors'
+        for c in range(images.shape[0]):
+            img = images[c,:,:]
+            img = Image.fromarray(img).resize((lr_size * factor, lr_size * factor), Image.NEAREST)
+            pixel_min, pixel_max = img.getextrema()
+            resized_path = f.replace('Wind2014_remove>20', 'resized_gt_' + str(factor) + 'X')[:-4]+'_channel'+str(c)+'.tif'
+            image_save(img, resized_path) # !!!!!!
+            img = ((np.array(img) - pixel_min) / max((pixel_max - pixel_min), 1e-5)) * (255 - 0) + 0
+            path_to_image = f.replace('Wind2014_remove>20', 'resized_gt_0-255' + str(factor) + 'X')[:-4]+'_channel'+str(c)+'.tif'
+            image_save(img, path_to_image) # !!!!!!
 
-net_input = (
-    get_noise(input_depth, INPUT, (imgs['HR_pil'].size[1], imgs['HR_pil'].size[0]))
-    .type(dtype)
-    .detach()
-)
+    # # generate ground truth image
+    # img = gdal.Open(path_to_image).ReadAsArray()
+    # img = Image.fromarray(img).resize((lr_size * factor, lr_size * factor), Image.NEAREST)
+    # pixel_min, pixel_max = img.getextrema()
+    # image_save(img, 'results/resized_gt_' + str(factor) + 'X.tif')
+    # img = ((np.array(img) - pixel_min) / max((pixel_max - pixel_min), 1e-5)) * (255 - 0) + 0
+    # image_save(img, 'results/resized_gt_0-255_' + str(factor) + 'X.tif')
+    # image_save(img, 'results/resized_gt_0-255_' + str(factor) + 'X.png')
+    # path_to_image = 'results/resized_gt_0-255_' + str(factor) + 'X.tif'
 
-NET_TYPE = 'skip'  # UNet, ResNet
-n_channels = 1
-net = get_net(
-    input_depth,
-    'skip',
-    pad,
-    skip_n33d=128,
-    skip_n33u=128,
-    skip_n11=4,
-    num_scales=num_scales,  # default 5
-    upsample_mode='bilinear',
-    n_channels=n_channels,
-).type(dtype)
+            # Starts here
+            imgs = load_LR_HR_imgs_sr(path_to_image, imsize, factor, enforse_div32)
 
-# Losses
-mse = torch.nn.MSELoss().type(dtype)
+            imgs['bicubic_np'], imgs['sharp_np'], imgs['nearest_np'] = get_baselines(
+                imgs['LR_pil'], imgs['HR_pil']
+            )
 
-img_LR_var = np_to_torch(imgs['LR_np']).type(dtype)
+            input_depth = 32
+            INPUT = 'noise'
+            pad = 'reflection'
+            OPT_OVER = 'net'
+            KERNEL_TYPE = 'lanczos2'
+            LR = 0.01
+            tv_weight = 0.0
+            OPTIMIZER = 'adam'
 
-downsampler = Downsampler(
-    n_planes=n_channels,
-    factor=factor,
-    kernel_type=KERNEL_TYPE,
-    phase=0.5,
-    preserve_size=True,
-).type(dtype)
+            if factor == 4:
+                num_iter = 2000
+                reg_noise_std = 0.03
+            elif factor == 8:
+                num_iter = 4000
+                reg_noise_std = 0.05
+            else:
+                assert False, 'We did not experiment with other factors'
 
+            net_input = (
+                get_noise(input_depth, INPUT, (imgs['HR_pil'].size[1], imgs['HR_pil'].size[0]))
+                .type(dtype)
+                .detach()
+            )
 
-def closure():
-    global i, net_input
+            NET_TYPE = 'skip'  # UNet, ResNet
+            n_channels = 1
+            net = get_net(
+                input_depth,
+                'skip',
+                pad,
+                skip_n33d=128,
+                skip_n33u=128,
+                skip_n11=4,
+                num_scales=num_scales,  # default 5
+                upsample_mode='bilinear',
+                n_channels=n_channels,
+            ).type(dtype)
 
-    if reg_noise_std > 0:
-        net_input = net_input_saved + (noise.normal_() * reg_noise_std)
+            # Losses
+            mse = torch.nn.MSELoss().type(dtype)
 
-    out_HR = net(net_input)
-    out_LR = downsampler(out_HR)
+            img_LR_var = np_to_torch(imgs['LR_np']).type(dtype)
 
-    total_loss = mse(out_LR, img_LR_var)
-
-    if tv_weight > 0:
-        total_loss += tv_weight * tv_loss(out_HR)
-
-    total_loss.backward()
-
-    # Log
-    psnr_LR = compare_psnr(imgs['LR_np'], torch_to_np(out_LR))
-    psnr_HR = compare_psnr(imgs['HR_np'], torch_to_np(out_HR))
-    print(
-        'Iteration %05d    PSNR_LR %.3f   PSNR_HR %.3f' % (i, psnr_LR, psnr_HR),
-        '\r',
-        end='',
-    )
-
-    # History
-    psnr_history.append([psnr_LR, psnr_HR])
-
-    if PLOT and i % 1000 == 0:
-        out_HR_np = torch_to_np(out_HR)
-        plot_image_grid(
-            [imgs['HR_np'], imgs['bicubic_np'], np.clip(out_HR_np, 0, 1)],
-            factor=13,
-            nrow=3,
-        )
-
-    i += 1
-
-    return total_loss
+            downsampler = Downsampler(
+                n_planes=n_channels,
+                factor=factor,
+                kernel_type=KERNEL_TYPE,
+                phase=0.5,
+                preserve_size=True,
+            ).type(dtype)
 
 
-psnr_history = []
-net_input_saved = net_input.detach().clone()
-noise = net_input.detach().clone()
+            def closure():
+                global i, net_input
 
-i = 0
-p = get_params(OPT_OVER, net, net_input)
-optimize(OPTIMIZER, p, closure, LR, num_iter)
+                if reg_noise_std > 0:
+                    net_input = net_input_saved + (noise.normal_() * reg_noise_std)
 
-out_HR_np = np.clip(torch_to_np(net(net_input)), 0, 1)
-result_deep_prior = put_in_center(
-    out_HR_np, imgs['orig_np'].shape[1:], n_channels=n_channels
-)
+                out_HR = net(net_input)
+                out_LR = downsampler(out_HR)
 
-# 0-255
-result_255 = (
-    (result_deep_prior - result_deep_prior.min())
-    / max((result_deep_prior.max() - result_deep_prior.min()), 1e-5)
-) * (255 - 0) + 0
-image_save(result_255, 'results/result_deep_prior_0-255_' + str(factor) + 'X.png')
-# original data range
-result_original = (
-    (result_deep_prior - result_deep_prior.min())
-    / max((result_deep_prior.max() - result_deep_prior.min()), 1e-5)
-) * (pixel_max - pixel_min) + pixel_min
-image_save(result_original, 'results/result_deep_prior_' + str(factor) + 'X.tif')
+                total_loss = mse(out_LR, img_LR_var)
 
-# For the paper we acually took `_bicubic.png` files from LapSRN viewer and used `result_deep_prior` as our result
-plot_image_grid([imgs['HR_np'], imgs['bicubic_np'], out_HR_np], factor=4, nrow=1)
+                if tv_weight > 0:
+                    total_loss += tv_weight * tv_loss(out_HR)
+
+                total_loss.backward()
+
+                # Log
+                psnr_LR = compare_psnr(imgs['LR_np'], torch_to_np(out_LR))
+                psnr_HR = compare_psnr(imgs['HR_np'], torch_to_np(out_HR))
+                print(
+                    'Iteration %05d    PSNR_LR %.3f   PSNR_HR %.3f' % (i, psnr_LR, psnr_HR),
+                    '\r',
+                    end='',
+                )
+
+                # History
+                psnr_history.append([psnr_LR, psnr_HR])
+
+                if PLOT and i % 1000 == 0:
+                    out_HR_np = torch_to_np(out_HR)
+                    plot_image_grid(
+                        [imgs['HR_np'], imgs['bicubic_np'], np.clip(out_HR_np, 0, 1)],
+                        factor=13,
+                        nrow=3,
+                    )
+
+                i += 1
+
+                return total_loss
+
+
+            psnr_history = []
+            net_input_saved = net_input.detach().clone()
+            noise = net_input.detach().clone()
+
+            i = 0
+            p = get_params(OPT_OVER, net, net_input)
+            optimize(OPTIMIZER, p, closure, LR, num_iter)
+
+            out_HR_np = np.clip(torch_to_np(net(net_input)), 0, 1)
+            result_deep_prior = put_in_center(
+                out_HR_np, imgs['orig_np'].shape[1:], n_channels=n_channels
+            )
+
+            # # 0-255
+            # result_255 = (
+            #     (result_deep_prior - result_deep_prior.min())
+            #     / max((result_deep_prior.max() - result_deep_prior.min()), 1e-5)
+            # ) * (255 - 0) + 0
+            # image_save(result_255, 'results/result_deep_prior_0-255_' + str(factor) + 'X.png')
+
+            # original data range
+            result_original = (
+                (result_deep_prior - result_deep_prior.min())
+                / max((result_deep_prior.max() - result_deep_prior.min()), 1e-5)
+            ) * (pixel_max - pixel_min) + pixel_min
+            result_path = f.replace('Wind2014_remove>20', 'result_dip_' + str(factor) + 'X')[:-4]+'_channel'+str(c)+'.tif'
+            image_save(result_original, result_path)
+
+            # # For the paper we acually took `_bicubic.png` files from LapSRN viewer and used `result_deep_prior` as our result
+            # plot_image_grid([imgs['HR_np'], imgs['bicubic_np'], out_HR_np], factor=4, nrow=1)
