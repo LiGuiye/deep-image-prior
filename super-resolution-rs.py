@@ -1,17 +1,20 @@
+import argparse
 import os
+import random
+from glob import glob
 
 import cv2
 import numpy as np
 import torch
 import torch.optim
-from osgeo import gdal
-from skimage.measure import compare_psnr
-from torch.nn import functional as F
-from glob import glob
+from skimage.metrics import peak_signal_noise_ratio as compare_psnr
+from torchvision import transforms
+from tqdm import tqdm
+
 from models import *
 from models.downsampler import Downsampler
 from utils.sr_utils import *
-import random
+
 
 def image_save(image, path):
     '''
@@ -32,7 +35,23 @@ def image_save(image, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
     cv2.imwrite(path, image.squeeze(), [cv2.IMWRITE_TIFF_COMPRESSION, 0])
 
-for factor in [4,8]:
+def upscale(feat, scale_factor: int = 2):
+    # resolution decrease
+    if scale_factor == 1:
+        return feat
+    else:
+        return F.avg_pool2d(feat, scale_factor)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='DIP')
+    parser.add_argument('--factor', type=int, help="4 or 8", default=4)
+    parser.add_argument('--slice', type=int, help="0-19", default=0)
+    args = parser.parse_args()
+
+    factor = args.factor
+    print('scale', factor, 'start!')
+    print('slice', args.slice)
+
     seed = 66
     random.seed(seed)
     np.random.seed(seed)
@@ -50,7 +69,7 @@ for factor in [4,8]:
     enforse_div32 = 'CROP'  # we usually need the dimensions to be divisible by a power of two (32 in this case)
     PLOT = False
 
-    path_to_image = '/home/guiyli/Documents/DataSet/NSRDB/tifFiles/2014/dhi/month1_day1_hour8_minute30_dhi.tif'
+    # path_to_image = '/home/guiyli/Documents/DataSet/NSRDB/tifFiles/2014/dhi/month1_day1_hour8_minute30_dhi.tif'
 
     # default num_scales is 5, which need the low resolution image size should be at least 16
     # we need to decrease num_scales to 4 to fit our data (8*8 --> 32*32 or 64*64)
@@ -63,31 +82,72 @@ for factor in [4,8]:
 
     # '/home/guiyli/Documents/DataSet/Wind/2014/u_v'
     # '/lustre/scratch/guiyli/Dataset_WIND/npyFiles/u_v/2014'
-    path = '/lustre/scratch/guiyli/Dataset_WIND/DIP/Wind2014_remove>20'
+    path = '/lustre/scratch/guiyli/Dataset_WIND/DIP/Wind2014_removed/u_v'
+    max_scale = 64
+    torch_resize = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Resize(
+                    (lr_size * max_scale, lr_size * max_scale),
+                    interpolation=transforms.InterpolationMode.NEAREST,
+                ),
+            ]
+        )
 
     # generate ground truth image
-    for f in glob(path+'/*.npy'):
+
+    images_list = glob(path + '/*.npy')
+    step = len(images_list) // 20
+    start = args.slice * step
+    stop = (args.slice + 1) * step
+    processing = images_list[start:] if args.slice == 19 else images_list[start:stop]
+    print("processing ", len(processing), 'images')
+    for f in tqdm(processing):
         images = np.load(f).astype(np.float32)
 
-        for c in range(images.shape[0]):
-            img = images[c,:,:]
-            img = Image.fromarray(img).resize((lr_size * factor, lr_size * factor), Image.NEAREST)
-            pixel_min, pixel_max = img.getextrema()
-            resized_path = f.replace('Wind2014_remove>20', 'resized_gt_' + str(factor) + 'X')[:-4]+'_channel'+str(c)+'.tif'
-            image_save(img, resized_path) # !!!!!!
-            img = ((np.array(img) - pixel_min) / max((pixel_max - pixel_min), 1e-5)) * (255 - 0) + 0
-            path_to_image = f.replace('Wind2014_remove>20', 'resized_gt_0-255' + str(factor) + 'X')[:-4]+'_channel'+str(c)+'.tif'
-            image_save(img, path_to_image) # !!!!!!
+        for c in range(images.shape[2]):
+            img = images[:, :, c]
 
-    # # generate ground truth image
-    # img = gdal.Open(path_to_image).ReadAsArray()
-    # img = Image.fromarray(img).resize((lr_size * factor, lr_size * factor), Image.NEAREST)
-    # pixel_min, pixel_max = img.getextrema()
-    # image_save(img, 'results/resized_gt_' + str(factor) + 'X.tif')
-    # img = ((np.array(img) - pixel_min) / max((pixel_max - pixel_min), 1e-5)) * (255 - 0) + 0
-    # image_save(img, 'results/resized_gt_0-255_' + str(factor) + 'X.tif')
-    # image_save(img, 'results/resized_gt_0-255_' + str(factor) + 'X.png')
-    # path_to_image = 'results/resized_gt_0-255_' + str(factor) + 'X.tif'
+            img = torch_resize(Image.fromarray(img))
+            # lores = upscale(img, max_scale)
+            hires = Image.fromarray(np.array(upscale(img, max_scale // factor)).squeeze())
+            pixel_min, pixel_max = hires.getextrema()
+
+            # img = Image.fromarray(img).resize((lr_size * factor, lr_size * factor), Image.NEAREST)
+            # pixel_min, pixel_max = img.getextrema()
+
+            resized_path = (
+                f.replace(
+                    'Wind2014_removed', 'torch_resize/resized_gt_' + str(factor) + 'X'
+                )[:-4]
+                + '_channel'
+                + str(c)
+                + '.tif'
+            )
+            image_save(hires, resized_path)
+            hires = ((np.array(hires) - pixel_min) / max((pixel_max - pixel_min), 1e-5)) * (
+                255 - 0
+            ) + 0
+            path_to_image = (
+                f.replace(
+                    'Wind2014_removed',
+                    'torch_resize/resized_gt_0-255_' + str(factor) + 'X',
+                )[:-4]
+                + '_channel'
+                + str(c)
+                + '.tif'
+            )
+            image_save(hires, path_to_image)
+
+            # # generate ground truth image
+            # img = gdal.Open(path_to_image).ReadAsArray()
+            # img = Image.fromarray(img).resize((lr_size * factor, lr_size * factor), Image.NEAREST)
+            # pixel_min, pixel_max = img.getextrema()
+            # image_save(img, 'results/resized_gt_' + str(factor) + 'X.tif')
+            # img = ((np.array(img) - pixel_min) / max((pixel_max - pixel_min), 1e-5)) * (255 - 0) + 0
+            # image_save(img, 'results/resized_gt_0-255_' + str(factor) + 'X.tif')
+            # image_save(img, 'results/resized_gt_0-255_' + str(factor) + 'X.png')
+            # path_to_image = 'results/resized_gt_0-255_' + str(factor) + 'X.tif'
 
             # Starts here
             imgs = load_LR_HR_imgs_sr(path_to_image, imsize, factor, enforse_div32)
@@ -115,7 +175,9 @@ for factor in [4,8]:
                 assert False, 'We did not experiment with other factors'
 
             net_input = (
-                get_noise(input_depth, INPUT, (imgs['HR_pil'].size[1], imgs['HR_pil'].size[0]))
+                get_noise(
+                    input_depth, INPUT, (imgs['HR_pil'].size[1], imgs['HR_pil'].size[0])
+                )
                 .type(dtype)
                 .detach()
             )
@@ -147,7 +209,6 @@ for factor in [4,8]:
                 preserve_size=True,
             ).type(dtype)
 
-
             def closure():
                 global i, net_input
 
@@ -167,11 +228,11 @@ for factor in [4,8]:
                 # Log
                 psnr_LR = compare_psnr(imgs['LR_np'], torch_to_np(out_LR))
                 psnr_HR = compare_psnr(imgs['HR_np'], torch_to_np(out_HR))
-                print(
-                    'Iteration %05d    PSNR_LR %.3f   PSNR_HR %.3f' % (i, psnr_LR, psnr_HR),
-                    '\r',
-                    end='',
-                )
+                # print(
+                #     'Iteration %05d    PSNR_LR %.3f   PSNR_HR %.3f' % (i, psnr_LR, psnr_HR),
+                #     '\r',
+                #     end='',
+                # )
 
                 # History
                 psnr_history.append([psnr_LR, psnr_HR])
@@ -187,7 +248,6 @@ for factor in [4,8]:
                 i += 1
 
                 return total_loss
-
 
             psnr_history = []
             net_input_saved = net_input.detach().clone()
@@ -214,7 +274,14 @@ for factor in [4,8]:
                 (result_deep_prior - result_deep_prior.min())
                 / max((result_deep_prior.max() - result_deep_prior.min()), 1e-5)
             ) * (pixel_max - pixel_min) + pixel_min
-            result_path = f.replace('Wind2014_remove>20', 'result_dip_' + str(factor) + 'X')[:-4]+'_channel'+str(c)+'.tif'
+            result_path = (
+                f.replace(
+                    'Wind2014_removed', 'torch_resize/result_dip_' + str(factor) + 'X'
+                )[:-4]
+                + '_channel'
+                + str(c)
+                + '.tif'
+            )
             image_save(result_original, result_path)
 
             # # For the paper we acually took `_bicubic.png` files from LapSRN viewer and used `result_deep_prior` as our result
