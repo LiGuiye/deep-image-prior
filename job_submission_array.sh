@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=dip8          # create a short name for your job
+#SBATCH --job-name=dipW8          # create a short name for your job
 #SBATCH --partition=matador
 #SBATCH --nodes=1                # node count
 #SBATCH --gpus-per-node=1
@@ -17,4 +17,4 @@ echo "Executing on the machine:" $(hostname)
 
 . $HOME/conda/etc/profile.d/conda.sh
 conda activate pytorch_gpu
-python super-resolution-rs.py --factor 8 --slice $SLURM_ARRAY_TASK_ID
+python super-resolution-rs.py --type Wind --factor 8 --slice $SLURM_ARRAY_TASK_ID --num_iter 6000
