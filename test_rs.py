@@ -32,10 +32,16 @@ def sliced_wasserstein(A, B, dir_repeats=4, dirs_per_repeat=128):
     return np.mean(results)  # average over repeats
 
 # 4X
-scale = 8
-original = '/lustre/scratch/guiyli/Dataset_WIND/DIP/Wind2014_removed/u_v'
-gt = '/lustre/scratch/guiyli/Dataset_WIND/DIP/torch_resize/resized_gt_'+str(scale)+'X/u_v'
-dip = '/lustre/scratch/guiyli/Dataset_WIND/DIP/torch_resize/result_dip_'+str(scale)+'X/u_v'
+scale = 4
+data_type = 'Solar'
+if data_type == 'Wind':
+    original = '/lustre/scratch/guiyli/Dataset_WIND/DIP/Wind2014_removed/u_v'
+    gt = '/lustre/scratch/guiyli/Dataset_WIND/DIP/torch_resize/new_iters/resized_gt_'+str(scale)+'X/u_v'
+    dip = '/lustre/scratch/guiyli/Dataset_WIND/DIP/torch_resize/new_iters/result_dip_'+str(scale)+'X/u_v'
+elif data_type == 'Solar':
+    original = '/lustre/scratch/guiyli/Dataset_NSRDB/DIP/Solar2014_removed/'
+    gt = '/lustre/scratch/guiyli/Dataset_NSRDB/DIP/torch_resize/new_iters/resized_gt_'+str(scale)+'X/'
+    dip = '/lustre/scratch/guiyli/Dataset_NSRDB/DIP/torch_resize/new_iters/result_dip_'+str(scale)+'X/'
 metrics = {'mse': [], 'std': []}
 metrics_min = 0
 metrics_max = 0
@@ -54,13 +60,13 @@ for f in tqdm(glob(original+'/*.npy')):
     metrics_min = metrics_min if img_gt.min() > metrics_min else img_gt.min()
     metrics_max = metrics_max if img_gt.max() < metrics_max else img_gt.max()
 
-os.makedirs('results/torch_resize',exist_ok=True)
+os.makedirs('results/torch_resize/'+data_type,exist_ok=True)
 np.save(
-    os.path.join('results/torch_resize', "error_mse_"+str(scale)+"X.npy"), metrics['mse']
+    os.path.join('results/torch_resize/'+data_type, "error_mse_"+str(scale)+"X.npy"), metrics['mse']
 )
 
 text_file = open(
-        os.path.join('results/torch_resize', "mean_metrics_mse_"+str(scale)+"X.txt"),
+        os.path.join('results/torch_resize/'+data_type, "mean_metrics_mse_"+str(scale)+"X.txt"),
         "w",
     )
 
