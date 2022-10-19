@@ -44,11 +44,25 @@ def upscale(feat, scale_factor: int = 2):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='DIP')
+    parser.add_argument('--type', type=str, help="Wind or Solar", default='Wind')
     parser.add_argument('--factor', type=int, help="4 or 8", default=4)
     parser.add_argument('--slice', type=int, help="0-19", default=0)
+    parser.add_argument('--savePath', type=str, default='torch_resize/new_iters')
+    parser.add_argument('--num_iter', type=int, default=0)
     args = parser.parse_args()
 
     factor = args.factor
+    data_type = args.type
+    if factor == 4:
+        num_iter = args.num_iter if args.num_iter else 2000
+        reg_noise_std = 0.03
+    elif factor == 8:
+        num_iter = args.num_iter if args.num_iter else 4000
+        reg_noise_std = 0.05
+    else:
+        assert False, 'We did not experiment with other factors'
+
+    print('Dataset', data_type)
     print('scale', factor, 'start!')
     print('slice', args.slice)
 
@@ -82,8 +96,13 @@ if __name__ == '__main__':
 
     # '/home/guiyli/Documents/DataSet/Wind/2014/u_v'
     # '/lustre/scratch/guiyli/Dataset_WIND/npyFiles/u_v/2014'
-    path = '/lustre/scratch/guiyli/Dataset_WIND/DIP/Wind2014_removed/u_v'
-    max_scale = 64
+    if data_type == 'Wind':
+        path = '/lustre/scratch/guiyli/Dataset_WIND/DIP/Wind2014_removed/u_v'
+        max_scale = 64
+    elif data_type == 'Solar':
+        path = '/lustre/scratch/guiyli/Dataset_NSRDB/DIP/Solar2014_removed'
+        max_scale = 32
+    
     torch_resize = transforms.Compose(
             [
                 transforms.ToTensor(),
@@ -118,7 +137,8 @@ if __name__ == '__main__':
 
             resized_path = (
                 f.replace(
-                    'Wind2014_removed', 'torch_resize/resized_gt_' + str(factor) + 'X'
+                    'Wind2014_removed' if data_type == 'Wind' else 'Solar2014_removed',
+                    args.savePath+'/resized_gt_' + str(factor) + 'X'
                 )[:-4]
                 + '_channel'
                 + str(c)
@@ -128,10 +148,11 @@ if __name__ == '__main__':
             hires = ((np.array(hires) - pixel_min) / max((pixel_max - pixel_min), 1e-5)) * (
                 255 - 0
             ) + 0
+
             path_to_image = (
                 f.replace(
-                    'Wind2014_removed',
-                    'torch_resize/resized_gt_0-255_' + str(factor) + 'X',
+                    'Wind2014_removed' if data_type == 'Wind' else 'Solar2014_removed',
+                    args.savePath+'/resized_gt_0-255_' + str(factor) + 'X',
                 )[:-4]
                 + '_channel'
                 + str(c)
@@ -165,14 +186,7 @@ if __name__ == '__main__':
             tv_weight = 0.0
             OPTIMIZER = 'adam'
 
-            if factor == 4:
-                num_iter = 2000
-                reg_noise_std = 0.03
-            elif factor == 8:
-                num_iter = 4000
-                reg_noise_std = 0.05
-            else:
-                assert False, 'We did not experiment with other factors'
+            
 
             net_input = (
                 get_noise(
@@ -228,11 +242,13 @@ if __name__ == '__main__':
                 # Log
                 psnr_LR = compare_psnr(imgs['LR_np'], torch_to_np(out_LR))
                 psnr_HR = compare_psnr(imgs['HR_np'], torch_to_np(out_HR))
-                # print(
-                #     'Iteration %05d    PSNR_LR %.3f   PSNR_HR %.3f' % (i, psnr_LR, psnr_HR),
-                #     '\r',
-                #     end='',
-                # )
+
+                if args.savePath=='debug':
+                    print(
+                        'Iteration %05d    PSNR_LR %.3f   PSNR_HR %.3f' % (i, psnr_LR, psnr_HR),
+                        '\r',
+                        end='',
+                    )
 
                 # History
                 psnr_history.append([psnr_LR, psnr_HR])
@@ -276,7 +292,8 @@ if __name__ == '__main__':
             ) * (pixel_max - pixel_min) + pixel_min
             result_path = (
                 f.replace(
-                    'Wind2014_removed', 'torch_resize/result_dip_' + str(factor) + 'X'
+                    'Wind2014_removed' if data_type == 'Wind' else 'Solar2014_removed',
+                    args.savePath+'/result_dip_' + str(factor) + 'X'
                 )[:-4]
                 + '_channel'
                 + str(c)
