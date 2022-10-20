@@ -1,6 +1,5 @@
 from glob import glob
 from osgeo import gdal
-from PIL import Image
 import numpy as np
 import os
 from tqdm import tqdm
@@ -32,8 +31,8 @@ def sliced_wasserstein(A, B, dir_repeats=4, dirs_per_repeat=128):
     return np.mean(results)  # average over repeats
 
 # 4X
-scale = 4
-data_type = 'Solar'
+scale = 8
+data_type = 'Wind'
 if data_type == 'Wind':
     original = '/lustre/scratch/guiyli/Dataset_WIND/DIP/Wind2014_removed/u_v'
     gt = '/lustre/scratch/guiyli/Dataset_WIND/DIP/torch_resize/new_iters/resized_gt_'+str(scale)+'X/u_v'
@@ -42,12 +41,13 @@ elif data_type == 'Solar':
     original = '/lustre/scratch/guiyli/Dataset_NSRDB/DIP/Solar2014_removed/'
     gt = '/lustre/scratch/guiyli/Dataset_NSRDB/DIP/torch_resize/new_iters/resized_gt_'+str(scale)+'X/'
     dip = '/lustre/scratch/guiyli/Dataset_NSRDB/DIP/torch_resize/new_iters/result_dip_'+str(scale)+'X/'
-metrics = {'mse': [], 'std': []}
+image_list = glob(original+'/*.npy')
+metrics = {'mse': [None]*len(image_list), 'std': []}
 metrics_min = 0
 metrics_max = 0
 
 
-for f in tqdm(glob(original+'/*.npy')):
+for idx, f in enumerate(tqdm(image_list)):
     name = os.path.basename(f)[:-4]
     # c h w
     img_gt = np.stack((gdal.Open(gt+'/'+name+'_channel0.tif').ReadAsArray(),gdal.Open(gt+'/'+name+'_channel1.tif').ReadAsArray()))
@@ -55,7 +55,7 @@ for f in tqdm(glob(original+'/*.npy')):
 
     mse = np.mean(np.square(img_gt - img_dip))
     # swd = sliced_wasserstein(img_gt, img_dip)
-    metrics['mse'].append(mse / np.square(img_gt.mean()))
+    metrics['mse'][idx] = mse / np.square(img_gt.mean())
 
     metrics_min = metrics_min if img_gt.min() > metrics_min else img_gt.min()
     metrics_max = metrics_max if img_gt.max() < metrics_max else img_gt.max()
