@@ -49,6 +49,9 @@ if __name__ == '__main__':
     parser.add_argument('--slice', type=int, help="0-19", default=0)
     parser.add_argument('--savePath', type=str, default='torch_resize/new_iters')
     parser.add_argument('--num_iter', type=int, default=0)
+    parser.add_argument('--process', type=str, default='resize')
+    parser.add_argument('--start_size', type=int, default=8)
+
     args = parser.parse_args()
 
     factor = args.factor
@@ -88,7 +91,6 @@ if __name__ == '__main__':
     # default num_scales is 5, which need the low resolution image size should be at least 16
     # we need to decrease num_scales to 4 to fit our data (8*8 --> 32*32 or 64*64)
     num_scales = 4
-    lr_size = 8
 
     # To produce images from the paper we took *_GT.png images from LapSRN viewer for corresponding factor,
     # e.g. x4/zebra_GT.png for factor=4, and x8/zebra_GT.png for factor=8
@@ -98,16 +100,14 @@ if __name__ == '__main__':
     # '/lustre/scratch/guiyli/Dataset_WIND/npyFiles/u_v/2014'
     if data_type == 'Wind':
         path = '/lustre/scratch/guiyli/Dataset_WIND/DIP/Wind2014_removed/u_v'
-        max_scale = 64
     elif data_type == 'Solar':
         path = '/lustre/scratch/guiyli/Dataset_NSRDB/DIP/Solar2014_removed'
-        max_scale = 32
-    
+
     torch_resize = transforms.Compose(
             [
                 transforms.ToTensor(),
                 transforms.Resize(
-                    (lr_size * max_scale, lr_size * max_scale),
+                    (args.start_size * factor, args.start_size * factor),
                     interpolation=transforms.InterpolationMode.NEAREST,
                 ),
             ]
@@ -127,9 +127,12 @@ if __name__ == '__main__':
         for c in range(images.shape[2]):
             img = images[:, :, c]
 
-            img = torch_resize(Image.fromarray(img))
+            if args.process == "extract":
+                img = Image.fromarray(img[:args.start_size * factor,:args.start_size * factor])
+            else:
+                img = torch_resize(Image.fromarray(img))
             # lores = upscale(img, max_scale)
-            hires = Image.fromarray(np.array(upscale(img, max_scale // factor)).squeeze())
+            hires = Image.fromarray(np.array(img).squeeze())
             pixel_min, pixel_max = hires.getextrema()
 
             # img = Image.fromarray(img).resize((lr_size * factor, lr_size * factor), Image.NEAREST)
