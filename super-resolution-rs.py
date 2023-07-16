@@ -46,6 +46,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='DIP')
     parser.add_argument('--type', type=str, help="Wind or Solar", default='Wind')
     parser.add_argument('--factor', type=int, help="4 or 8", default=4)
+    parser.add_argument('--slicesNum', type=int, help="number of slices", default=20)
     parser.add_argument('--slice', type=int, help="0-19", default=0)
     parser.add_argument('--savePath', type=str, default='torch_resize/new_iters')
     parser.add_argument('--num_iter', type=int, default=0)
@@ -56,10 +57,10 @@ if __name__ == '__main__':
 
     factor = args.factor
     data_type = args.type
-    if factor == 4:
+    if factor == 4 or factor == 5:
         num_iter = args.num_iter if args.num_iter else 2000
         reg_noise_std = 0.03
-    elif factor == 8:
+    elif factor == 8 or factor == 10 or factor == 25 or factor == 32 or factor == 50 or factor == 64:
         num_iter = args.num_iter if args.num_iter else 4000
         reg_noise_std = 0.05
     else:
@@ -116,15 +117,28 @@ if __name__ == '__main__':
     # generate ground truth image
 
     images_list = glob(path + '/*.npy')
-    step = len(images_list) // 20
+    step = len(images_list) // args.slicesNum
     start = args.slice * step
     stop = (args.slice + 1) * step
-    processing = images_list[start:] if args.slice == 19 else images_list[start:stop]
+    processing = images_list[start:] if args.slice == (args.slicesNum-1) else images_list[start:stop]
     print("processing ", len(processing), 'images')
     for f in tqdm(processing):
         images = np.load(f).astype(np.float32)
-
+                
         for c in range(images.shape[2]):
+            # check if the result for this file is already exist
+            result_path = (
+                    f.replace(
+                        'Wind2014_removed' if data_type == 'Wind' else 'Solar2014_removed',
+                        args.savePath+'/result_dip_' + str(factor) + 'X'
+                    )[:-4]
+                    + '_channel'
+                    + str(c)
+                    + '.tif'
+                )
+            if os.path.exists(result_path):
+                continue
+
             img = images[:, :, c]
 
             if args.process == "extract":
@@ -293,15 +307,15 @@ if __name__ == '__main__':
                 (result_deep_prior - result_deep_prior.min())
                 / max((result_deep_prior.max() - result_deep_prior.min()), 1e-5)
             ) * (pixel_max - pixel_min) + pixel_min
-            result_path = (
-                f.replace(
-                    'Wind2014_removed' if data_type == 'Wind' else 'Solar2014_removed',
-                    args.savePath+'/result_dip_' + str(factor) + 'X'
-                )[:-4]
-                + '_channel'
-                + str(c)
-                + '.tif'
-            )
+            # result_path = (
+            #     f.replace(
+            #         'Wind2014_removed' if data_type == 'Wind' else 'Solar2014_removed',
+            #         args.savePath+'/result_dip_' + str(factor) + 'X'
+            #     )[:-4]
+            #     + '_channel'
+            #     + str(c)
+            #     + '.tif'
+            # )
             image_save(result_original, result_path)
 
             # # For the paper we acually took `_bicubic.png` files from LapSRN viewer and used `result_deep_prior` as our result
