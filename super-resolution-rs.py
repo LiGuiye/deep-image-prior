@@ -50,7 +50,6 @@ if __name__ == '__main__':
     parser.add_argument('--slice', type=int, help="0-19", default=0)
     parser.add_argument('--savePath', type=str, default='torch_resize/new_iters')
     parser.add_argument('--num_iter', type=int, default=0)
-    parser.add_argument('--process', type=str, default='resize')
     parser.add_argument('--start_size', type=int, default=8)
 
     args = parser.parse_args()
@@ -97,24 +96,29 @@ if __name__ == '__main__':
     # e.g. x4/zebra_GT.png for factor=4, and x8/zebra_GT.png for factor=8
     # path_to_image = 'data/sr/zebra_GT.png'
 
-    # '/home/guiyli/Documents/DataSet/Wind/2014/u_v'
-    # '/lustre/scratch/guiyli/Dataset_WIND/npyFiles/u_v/2014'
     if data_type == 'Wind':
-        path = '/lustre/scratch/guiyli/Dataset_WIND/DIP/Wind2014_removed/u_v'
+        path = "/lustre/scratch/guiyli/Dataset_WIND/npyFiles/2014/u_v/"
     elif data_type == 'Solar':
-        path = '/lustre/scratch/guiyli/Dataset_NSRDB/DIP/Solar2014_removed'
+        path = "/lustre/scratch/guiyli/Dataset_NSRDB/npyFiles/dni_dhi/Solar2014_removed/"
 
-    torch_resize = transforms.Compose(
+    if data_type == 'Wind':
+        save_folder_hr = "/lustre/scratch/guiyli/Dataset_WIND/Results/DIP2014/DIP_hr_uint8_scale" + str(factor)
+        save_folder_fake = "/lustre/scratch/guiyli/Dataset_WIND/Results/DIP2014/DIP_fake_scale" + str(factor)
+    else:
+        save_folder_hr = "/lustre/scratch/guiyli/Dataset_NSRDB/Results/DIP2014/DIP_hr_uint8_scale" + str(factor)
+        save_folder_fake = "/lustre/scratch/guiyli/Dataset_NSRDB/Results/DIP2014/DIP_fake_scale" + str(factor)
+    os.makedirs(save_folder_hr, exist_ok=True)
+    os.makedirs(save_folder_fake, exist_ok=True)
+
+    resize2tensor = transforms.Compose(
             [
-                transforms.ToTensor(),
+                transforms.ToTensor(),  # convert from HWC to CHW
                 transforms.Resize(
-                    (args.start_size * factor, args.start_size * factor),
+                    (512, 512),
                     interpolation=transforms.InterpolationMode.NEAREST,
                 ),
             ]
         )
-
-    # generate ground truth image
 
     images_list = glob(path + '/*.npy')
     step = len(images_list) // args.slicesNum
@@ -124,71 +128,28 @@ if __name__ == '__main__':
     print("processing ", len(processing), 'images')
     for f in tqdm(processing):
         images = np.load(f).astype(np.float32)
-                
+        baseName = os.path.basename(f)[:-4]
         for c in range(images.shape[2]):
             # check if the result for this file is already exist
-            result_path = (
-                    f.replace(
-                        'Wind2014_removed' if data_type == 'Wind' else 'Solar2014_removed',
-                        args.savePath+'/result_dip_' + str(factor) + 'X'
-                    )[:-4]
-                    + '_channel'
-                    + str(c)
-                    + '.tif'
-                )
+            result_path = os.path.join(save_folder_fake, baseName + '_channel' + str(c) + '.tif')
             if os.path.exists(result_path):
                 continue
 
             img = images[:, :, c]
 
-            if args.process == "extract":
-                img = Image.fromarray(img[:args.start_size * factor,:args.start_size * factor])
-            else:
-                img = torch_resize(Image.fromarray(img))
+            img = resize2tensor(Image.fromarray(img))
+            img = upscale(img, 64 // factor)
+
             # lores = upscale(img, max_scale)
             hires = Image.fromarray(np.array(img).squeeze())
             pixel_min, pixel_max = hires.getextrema()
+            hires = ((np.array(hires) - pixel_min) / max((pixel_max - pixel_min), 1e-5)) * 255
 
-            # img = Image.fromarray(img).resize((lr_size * factor, lr_size * factor), Image.NEAREST)
-            # pixel_min, pixel_max = img.getextrema()
-
-            resized_path = (
-                f.replace(
-                    'Wind2014_removed' if data_type == 'Wind' else 'Solar2014_removed',
-                    args.savePath+'/resized_gt_' + str(factor) + 'X'
-                )[:-4]
-                + '_channel'
-                + str(c)
-                + '.tif'
-            )
-            image_save(hires, resized_path)
-            hires = ((np.array(hires) - pixel_min) / max((pixel_max - pixel_min), 1e-5)) * (
-                255 - 0
-            ) + 0
-
-            path_to_image = (
-                f.replace(
-                    'Wind2014_removed' if data_type == 'Wind' else 'Solar2014_removed',
-                    args.savePath+'/resized_gt_0-255_' + str(factor) + 'X',
-                )[:-4]
-                + '_channel'
-                + str(c)
-                + '.tif'
-            )
-            image_save(hires, path_to_image)
-
-            # # generate ground truth image
-            # img = gdal.Open(path_to_image).ReadAsArray()
-            # img = Image.fromarray(img).resize((lr_size * factor, lr_size * factor), Image.NEAREST)
-            # pixel_min, pixel_max = img.getextrema()
-            # image_save(img, 'results/resized_gt_' + str(factor) + 'X.tif')
-            # img = ((np.array(img) - pixel_min) / max((pixel_max - pixel_min), 1e-5)) * (255 - 0) + 0
-            # image_save(img, 'results/resized_gt_0-255_' + str(factor) + 'X.tif')
-            # image_save(img, 'results/resized_gt_0-255_' + str(factor) + 'X.png')
-            # path_to_image = 'results/resized_gt_0-255_' + str(factor) + 'X.tif'
+            hr_path = os.path.join(save_folder_hr, baseName + '_channel' + str(c) + '.tif')
+            image_save(hires, hr_path)
 
             # Starts here
-            imgs = load_LR_HR_imgs_sr(path_to_image, imsize, factor, enforse_div32)
+            imgs = load_LR_HR_imgs_sr(hr_path, imsize, factor, enforse_div32)
 
             imgs['bicubic_np'], imgs['sharp_np'], imgs['nearest_np'] = get_baselines(
                 imgs['LR_pil'], imgs['HR_pil']
@@ -202,8 +163,6 @@ if __name__ == '__main__':
             LR = 0.01
             tv_weight = 0.0
             OPTIMIZER = 'adam'
-
-            
 
             net_input = (
                 get_noise(
@@ -307,15 +266,6 @@ if __name__ == '__main__':
                 (result_deep_prior - result_deep_prior.min())
                 / max((result_deep_prior.max() - result_deep_prior.min()), 1e-5)
             ) * (pixel_max - pixel_min) + pixel_min
-            # result_path = (
-            #     f.replace(
-            #         'Wind2014_removed' if data_type == 'Wind' else 'Solar2014_removed',
-            #         args.savePath+'/result_dip_' + str(factor) + 'X'
-            #     )[:-4]
-            #     + '_channel'
-            #     + str(c)
-            #     + '.tif'
-            # )
             image_save(result_original, result_path)
 
             # # For the paper we acually took `_bicubic.png` files from LapSRN viewer and used `result_deep_prior` as our result
